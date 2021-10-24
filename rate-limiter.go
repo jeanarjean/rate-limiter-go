@@ -7,51 +7,32 @@ import (
 )
 
 type Message struct {
-	Url       string
-	Header    http.Header
-	Method    string
-	Timestamp time.Time
+	Url    string
+	Header http.Header
+	Method string
 }
 
 type Algorithm string
 
 const (
 	NoRateLimiting     = "NoRateLimiting"
-	ConstantRate       = "ConstantRate"
 	TokenBucket        = "TokenBucket"
 	LeakingBucket      = "LeakingBucket"
 	FixedWindowCounter = "FixedWindowCounter"
 	SlidingWindowLog   = "SlidingWindow"
 )
 
-// Every 1000 seconds run the cleanup
-const arraySize = 10
-
-var requestsQueue = make(chan Message, 300)
-
-var index = 0
 var httpClient = http.Client{}
-var requestsReceived = 0
 
-//TODO: move this in noConstantRateLimiting scope
-var limiter = time.Tick(500 * time.Millisecond)
+var rateLimitingFunc func() bool = noRateLimiting()
 
-func noRateLimiting() {
-	for {
-		requestToSend := <-requestsQueue
-		sendReceivedRequestToServer(requestToSend)
+func noRateLimiting() func() bool {
+	return func() bool {
+		return true
 	}
 }
 
-func constantRate() {
-	for {
-		<-limiter
-		requestToSend := <-requestsQueue
-		sendReceivedRequestToServer(requestToSend)
-	}
-}
-
-func tokenBucket() {
+func tokenBucket() func() bool {
 	tokens := make(chan bool, 4)
 	interval := time.Tick(500 * time.Millisecond)
 	go func() {
@@ -67,24 +48,32 @@ func tokenBucket() {
 			}
 		}
 	}()
-	for {
-		<-tokens
-		requestToSend := <-requestsQueue
-		sendReceivedRequestToServer(requestToSend)
+
+	return func() bool {
+		select {
+		case <-tokens:
+			return true
+		default:
+			return false
+		}
 	}
 }
 
-func leakingBucket() {
-	for {
-		<-limiter
-		requestToSend := <-requestsQueue
-		sendReceivedRequestToServer(requestToSend)
-		requestToSend = <-requestsQueue
-		sendReceivedRequestToServer(requestToSend)
+func leakingBucket() func() bool {
+	const interval = 500 * time.Millisecond
+	var lastRequestTime = time.Now().Add(-interval)
+
+	return func() bool {
+		if lastRequestTime.Add(interval).Before(time.Now()) {
+			lastRequestTime = time.Now()
+			return true
+		}
+
+		return false
 	}
 }
 
-func fixedWindowCounter() {
+func fixedWindowCounter() func() bool {
 	requestsDuringInterval := 0
 	const maxRequests = 4
 	interval := time.Tick(1000 * time.Millisecond)
@@ -94,24 +83,25 @@ func fixedWindowCounter() {
 			requestsDuringInterval = 0
 		}
 	}()
-	for {
+
+	return func() bool {
 		if requestsDuringInterval < 4 {
 			requestsDuringInterval++
-			requestToSend := <-requestsQueue
-			sendReceivedRequestToServer(requestToSend)
+			return true
 		}
+
+		return false
 	}
 }
 
-func slidingWindowLog() {
-	var recentRequests []Message
-	for {
-		recentRequest := <-requestsQueue
-		var temp []Message
+func slidingWindowLog() func() bool {
+	var recentRequests []time.Time
+	const interval = 500 * time.Millisecond
+
+	return func() bool {
+		var temp []time.Time
 		for _, r := range recentRequests {
-			//fmt.Printf("Request Timestamp: %v, Now: %v \n", r.Timestamp.Add((time.Second)), time.Now())
-			fmt.Printf("%v \n", len(recentRequests))
-			if r.Timestamp.Add(time.Second).After(time.Now()) {
+			if r.Add(interval).After(time.Now()) {
 				temp = append(temp, r)
 			}
 		}
@@ -121,23 +111,25 @@ func slidingWindowLog() {
 		// There is ambiguity here whether dropped requests should be kept in the log, however in this program's case/benchmark, it DOS the server
 		// to keep them in the log, so we won't
 		if len(recentRequests) < 3 {
-			recentRequests = append(recentRequests, recentRequest)
-			sendReceivedRequestToServer(recentRequest)
+			recentRequests = append(recentRequests, time.Now())
+			return true
 		}
+		return false
 	}
 }
 
 func receiveHttpCall(w http.ResponseWriter, req *http.Request) {
-	requestsReceived += 1
-	fmt.Printf("Rate Limiter has %d received requests\n", requestsReceived)
-
 	message := Message{
 		req.URL.String(),
 		req.Header,
 		req.Method,
-		time.Now(),
 	}
-	requestsQueue <- message
+
+	if rateLimitingFunc() {
+		sendReceivedRequestToServer(message)
+	} else {
+		http.Error(w, "Request has been throttled", http.StatusTooManyRequests)
+	}
 }
 func sendReceivedRequestToServer(message Message) {
 	request, err := http.NewRequest(message.Method, "http://localhost:8090/server", nil)
@@ -152,22 +144,21 @@ func sendReceivedRequestToServer(message Message) {
 }
 
 func rateLimiter(a Algorithm) {
-	http.HandleFunc("/rate-limiter", receiveHttpCall)
 
 	switch a {
 	case NoRateLimiting:
-		go noRateLimiting()
-	case ConstantRate:
-		go constantRate()
+		rateLimitingFunc = noRateLimiting()
 	case TokenBucket:
-		go tokenBucket()
+		rateLimitingFunc = tokenBucket()
 	case LeakingBucket:
-		go leakingBucket()
+		rateLimitingFunc = leakingBucket()
 	case FixedWindowCounter:
-		go fixedWindowCounter()
+		rateLimitingFunc = fixedWindowCounter()
 	case SlidingWindowLog:
-		go slidingWindowLog()
+		rateLimitingFunc = slidingWindowLog()
 	}
+
+	http.HandleFunc("/rate-limiter", receiveHttpCall)
 
 	http.ListenAndServe(":8091", nil)
 }

@@ -1,7 +1,7 @@
 package main
 
 func main() {
-	// Add requests to send parameter?
+	//TOOD: Add CLI to decide which algorithms will run
 	go client()
 	go rateLimiter(SlidingWindowLog)
 	server()
