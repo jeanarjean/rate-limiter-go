@@ -34,14 +34,10 @@ func noRateLimiting() func() bool {
 
 func tokenBucket() func() bool {
 	tokens := make(chan bool, 4)
-	interval := time.Tick(500 * time.Millisecond)
+	interval := time.Tick(400 * time.Millisecond)
 	go func() {
 		for {
 			<-interval
-			if len(tokens) != cap(tokens) {
-				fmt.Printf("Adding a token in the bucket\n")
-				tokens <- true
-			}
 			if len(tokens) != cap(tokens) {
 				fmt.Printf("Adding a token in the bucket\n")
 				tokens <- true
@@ -85,7 +81,7 @@ func fixedWindowCounter() func() bool {
 	}()
 
 	return func() bool {
-		if requestsDuringInterval < 4 {
+		if requestsDuringInterval < 2 {
 			requestsDuringInterval++
 			return true
 		}
@@ -96,7 +92,7 @@ func fixedWindowCounter() func() bool {
 
 func slidingWindowLog() func() bool {
 	var recentRequests []time.Time
-	const interval = 500 * time.Millisecond
+	const interval = 400 * time.Millisecond
 
 	return func() bool {
 		var temp []time.Time
@@ -110,7 +106,7 @@ func slidingWindowLog() func() bool {
 
 		// There is ambiguity here whether dropped requests should be kept in the log, however in this program's case/benchmark, it DOS the server
 		// to keep them in the log, so we won't
-		if len(recentRequests) < 3 {
+		if len(recentRequests) < 2 {
 			recentRequests = append(recentRequests, time.Now())
 			return true
 		}
@@ -128,7 +124,7 @@ func receiveHttpCall(w http.ResponseWriter, req *http.Request) {
 	if rateLimitingFunc() {
 		sendReceivedRequestToServer(message)
 	} else {
-		http.Error(w, "Request has been throttled", http.StatusTooManyRequests)
+		http.Error(w, "Request has been refused", http.StatusTooManyRequests)
 	}
 }
 func sendReceivedRequestToServer(message Message) {
