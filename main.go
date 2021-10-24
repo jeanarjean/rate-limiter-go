@@ -15,7 +15,7 @@ func main() {
 	}
 
 	switch os.Args[1] {
-	case "noRate":
+	case "noRateLimiting":
 		go rateLimiter(NoRateLimiting)
 	case "tokenBucket":
 		go rateLimiter(TokenBucket)
