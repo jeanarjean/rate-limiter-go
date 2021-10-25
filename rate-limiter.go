@@ -39,7 +39,6 @@ func tokenBucket() func() bool {
 		for {
 			<-interval
 			if len(tokens) != cap(tokens) {
-				fmt.Printf("Adding a token in the bucket\n")
 				tokens <- true
 			}
 		}

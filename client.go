@@ -38,11 +38,10 @@ func sendRequests() {
 		}
 	}
 	time.Sleep(1 * time.Second)
-	fmt.Println("Program is done executing and is exiting")
+	fmt.Printf(NoticeColor, "Program is done executing and is exiting\n")
 	os.Exit(0)
 }
 
 func client() {
 	sendRequests()
-	fmt.Println("Client has finished sending its request")
 }

@@ -9,7 +9,7 @@ func main() {
 	go client()
 
 	if len(os.Args) < 2 {
-		fmt.Println("expected 'noRate', 'tokenBucket', 'leakingBucket, 'fixedWindowWCounter' or 'slidingWindowLog' to be specified")
+		fmt.Println("expected 'noRateLimiting', 'tokenBucket', 'leakingBucket, 'fixedWindowWCounter' or 'slidingWindowLog' to be specified")
 		fmt.Println("example: '.\\rate-limiter tokenBucket'")
 		os.Exit(1)
 	}
